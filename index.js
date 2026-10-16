@@ -166,32 +166,33 @@ app.get("/get/:deviceIdentifier/:control", async (req, res) => {
 // TODO make this a POST instead. It doesn't seem to get called with post
 // app.post('/set/:deviceIdentifier/:control/:values', async (req, res) => {
 app.get("/set/:deviceIdentifier/:control/:values", async (req, res) => {
-  let values = req.params.values.split(",");
-  const cam = await getCameraByIdentifier(req.params.deviceIdentifier);
-  const controlObj = await cam.get(req.params.control);
-  console.log("controlObj", controlObj);
-  const currentValue = Object.values(controlObj)[0];
-  console.log("setting", req.params.control, values);
+  // Convert values to integers (UVC controls expect integers)
+  let values = req.params.values.split(",").map((v) => {
+    const num = parseFloat(v);
+    return isNaN(num) ? v : Math.round(num).toString();
+  });
+  let currentValue = null;
 
   try {
     const cam = await getCameraByIdentifier(req.params.deviceIdentifier);
+    const controlObj = await cam.get(req.params.control);
+    console.log("controlObj", controlObj);
+    currentValue = Object.values(controlObj)[0];
+    console.log("setting", req.params.control, values, "(rounded from", req.params.values + ")");
+
     const retVals = await cam.set(req.params.control, values);
     res.send(retVals);
   } catch (err) {
-    if (err.message.includes("LIBUSB_TRANSFER_STALL")) {
-      //recover camera
-      const retVals = await cam.set(req.params.control, [
-        currentValue.toString(),
-      ]);
+    if (err.message && err.message.includes("LIBUSB_TRANSFER_STALL")) {
       res.status(405).json({
-        error: `Failed to set ${req.params.control} to ${values}. Resetting to ${retVals}`,
+        error: `Failed to set ${req.params.control} to ${values}. Current value: ${currentValue}`,
       });
     } else {
-      res
-        .status(500)
-        .send(`Could not set ${req.params.control} to ${currentValue}`, err);
+      res.status(500).json({
+        error: `Could not set ${req.params.control}`,
+        details: err.message || err,
+      });
     }
-
     console.error(err);
   }
 });
